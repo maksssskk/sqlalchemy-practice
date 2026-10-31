@@ -134,3 +134,42 @@ with Session(engine) as session:
              .join_from(Client, subq, Client.id == subq.c.id))
     for name, count in session.execute(task4):
         print(f'Name: {name} | Total orders: {count}')
+
+#task5
+subq = select(func.max(Order.price).label('max_price')).scalar_subquery()
+with Session(engine) as session:
+    task5 = select(Order.title, Client.name, Order.price).join(Client).where(Order.price == subq)
+    for title, name, price in session.execute(task5):
+        print(f'Order: {title} | Client name: {name} | Price: {price}')
+
+
+#task6
+subq = (
+    select(Client.id, Client.name, func.sum(Order.price).label('total_spent'))
+    .join(Order, Client.id == Order.client_id)
+    .group_by(Client.id, Client.name)
+    .cte()
+)
+avg_price_subq = select(func.avg(Order.price)).scalar_subquery()
+
+with Session(engine) as session:
+    task6 = select(Client.name, subq.c.total_spent).join_from(Client, subq, Client.id == subq.c.id).where(subq.c.total_spent > avg_price_subq)
+    for name, spent in session.execute(task6):
+        print(f'Client: {name} | Total spent: {spent}')
+
+#task7
+count_subq = (
+    select(Client.id, Client.name, func.count(Order.status).label('count'))
+    .join(Order)
+    .where(Order.status == 'completed')
+    .group_by(Client.id, Client.name)
+    .cte()
+
+    )
+with Session(engine) as session:
+    task7 = (
+        select(Client.name, count_subq.c.count)
+        .join_from(Client, count_subq, Client.id == count_subq.c.id)
+        )
+    for name, count in session.execute(task7):
+        print(f'Client: {name} | Completed orders: {count}')
