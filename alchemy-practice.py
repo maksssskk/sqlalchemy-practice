@@ -2,8 +2,8 @@ from __future__ import annotations
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, Session
-from sqlalchemy.orm import mapped_column
-from sqlalchemy import insert, func, ForeignKey, select, bindparam, cast, String
+from sqlalchemy.orm import mapped_column, aliased
+from sqlalchemy import insert, func, ForeignKey, select, bindparam, cast, String, desc
 from typing import List
 from sqlalchemy.orm import relationship
 
@@ -51,6 +51,8 @@ with Session(engine) as session:
     session.commit()
 
 #Selecting
+
+#task1
 scalar_subq = (select(Client.name)
                .where(Client.channel_type == bindparam('type'))
                .scalar_subquery())
@@ -59,6 +61,7 @@ with Session(engine) as session:
     res = session.execute(stmt, {'type': 'Reels'}).scalar()
     print(f'Client: {res}')
 
+#task2
 stmt2 = select(Order.title, Order.price).where(Order.price > bindparam('price'))
 
 with Session(engine) as session:
@@ -66,6 +69,7 @@ with Session(engine) as session:
     for title, price in res:
         print(f'Project: {title} | Price: ${price}')
 
+#task3
 res = ('Order: ' + Order.title + " ($" + cast(Order.price, String) + ")").label('order_info')
 stmt3 = select(res).order_by(Order.title)
 with Session(engine) as session:
@@ -87,3 +91,46 @@ with Session(engine) as session:
     total = session.execute(q4).scalar()
     print(f'Total count: {total}')
 
+#Group By/Having/Subquery/CTEs
+
+#task1
+task1 = (select(Client.name, func.sum(Order.price).label('total_spent'))
+         .join(Order)
+         .group_by(Client.name)
+         .having(func.sum(Order.price) > 100)
+         .order_by(desc('total_spent')))
+with Session(engine) as session:
+    for name, total in session.execute(task1):
+        print(f'Client Name: {name} | Total earned: {total}')
+
+#task2
+o1 = aliased(Order)
+o2 = aliased(Order)
+task2 = (select(o1.title, o1.price, o2.title, o2.price)
+         .join_from(o1, o2, o1.price > o2.price)
+         )
+with Session(engine) as session:
+    for t1, p1, t2, p2 in session.execute(task2):
+        print(f'"{t1}" (${p1}) more expensive than "{t2}" (${p2})')
+
+#task3
+subq = select(func.avg(Order.price)).scalar_subquery()
+
+with Session(engine) as session:
+    task3 = select(Order.title, Order.price).where(Order.price > subq)
+    for title, price in session.execute(task3):
+        print(f'Order: {title} | Price: ${price}')
+
+#task4
+subq = (
+    select(Client.id, Client.name, func.count(Order.id).label('count'))
+    .join(Order, Client.id == Order.client_id)
+    .group_by(Client.id, Client.name)
+    .cte()
+)
+
+with Session(engine) as session:
+    task4 = (select(Client.name, subq.c.count)
+             .join_from(Client, subq, Client.id == subq.c.id))
+    for name, count in session.execute(task4):
+        print(f'Name: {name} | Total orders: {count}')
