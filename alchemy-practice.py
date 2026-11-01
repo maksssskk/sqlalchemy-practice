@@ -3,7 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, Session
 from sqlalchemy.orm import mapped_column, aliased
-from sqlalchemy import insert, func, ForeignKey, select, bindparam, cast, String, desc
+from sqlalchemy import insert, func, ForeignKey, select, bindparam, cast, String, desc, union_all
 from typing import List
 from sqlalchemy.orm import relationship
 
@@ -173,3 +173,85 @@ with Session(engine) as session:
         )
     for name, count in session.execute(task7):
         print(f'Client: {name} | Completed orders: {count}')
+
+#Advanced Subqueries, CTEs, Unions & Lateral
+
+#task1
+subq = select(Order).where(Order.status == 'completed').subquery()
+order_subq = aliased(Order, subq)
+stmt = (
+    select(Client, order_subq)
+    .join_from(Client, order_subq)
+)
+with Session(engine) as session:
+    for client, order in session.execute(stmt):
+        print(f'Client: {client.name} | Order: {order.title} | Price: {order.price}')
+
+#task2
+cl_sum = (select(func.sum(Order.price).label('total'))
+          .where(Client.id == Order.client_id)
+          .scalar_subquery())
+with Session(engine) as session:
+    stmt = select(Client.name, cl_sum)
+    for name, total in session.execute(stmt):
+        print(f'Client: {name} | Total orders: ${total}')
+
+#task3
+cl_max = (select(func.max(Order.price).label('max'))
+          .where(Client.id == Order.client_id)
+          .scalar_subquery())
+with Session(engine) as session:
+    stmt = select(Client.name, func.coalesce(cl_max, 0))
+    for name, max in session.execute(stmt):
+        print(f'Client: {name} | Maximum bill: ${max}')
+
+#task4
+cl_inprogress = (
+    select(func.count(Order.id).label('count'))
+    .where((Order.status == 'in_progress') & (Client.id == Order.client_id))
+    .scalar_subquery()
+)
+with Session(engine) as session:
+    stmt = select(Client.name, cl_inprogress)
+    for name, order in session.execute(stmt):
+        print(f'Client: {name} | Orders in progress: {order}')
+
+#task5(postgresql)
+subq = (
+    select(Order.title, Order.price, Order.client_id)
+    .where(Client.id == Order.client_id)
+    .order_by(Order.price.desc())
+    .limit(1)
+    .lateral()
+)
+with Session(engine) as session:
+    stmt = (
+        select(Client.name, subq.c.title, subq.c.price)
+        .join_from(Client, subq, Client.id == subq.c.client_id)
+    )
+    for name, title, max in session.execute(stmt):
+        print(f'Client: {name} | Order: {title} | Price: ${max}')
+
+#task6
+
+#Using alias
+s1 = select(Order).where(Order.status == 'completed')
+s2 = select(Order).where(Order.price > 300)
+
+u = union_all(s1, s2)
+
+alias = aliased(Order, u.subquery())
+orm_stmt = select(alias).order_by(alias.id)
+with Session(engine) as session:
+    for order in session.execute(orm_stmt).scalars():
+        print(f'Order: {order.title} | Price: ${order.price} | Status: {order.status}')
+
+#Using from_statement()
+s1 = select(Order).where(Order.status == 'completed')
+s2 = select(Order).where(Order.price > 300)
+
+u = union_all(s1, s2)
+orm_stmt = select(Order).from_statement(u)
+with Session(engine) as session:
+    for order in session.execute(orm_stmt).scalars():
+        print(f'Order: {order.title} | Price: ${order.price} | Status: {order.status}')
