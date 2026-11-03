@@ -1,12 +1,7 @@
 from __future__ import annotations
-from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.orm import Mapped, Session
-from sqlalchemy.orm import mapped_column, aliased
-from sqlalchemy import insert, func, ForeignKey, select, bindparam, cast, String, desc, union_all
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, aliased, relationship
+from sqlalchemy import insert, func, ForeignKey, select, bindparam, cast, String, desc, union_all, create_engine, cast
 from typing import List
-from sqlalchemy.orm import relationship
-
 
 engine = create_engine("sqlite+pysqlite:///:memory:", echo=True)
 
@@ -217,20 +212,20 @@ with Session(engine) as session:
         print(f'Client: {name} | Orders in progress: {order}')
 
 #task5(postgresql)
-subq = (
-    select(Order.title, Order.price, Order.client_id)
-    .where(Client.id == Order.client_id)
-    .order_by(Order.price.desc())
-    .limit(1)
-    .lateral()
-)
-with Session(engine) as session:
-    stmt = (
-        select(Client.name, subq.c.title, subq.c.price)
-        .join_from(Client, subq, Client.id == subq.c.client_id)
-    )
-    for name, title, max in session.execute(stmt):
-        print(f'Client: {name} | Order: {title} | Price: ${max}')
+# subq = (
+#     select(Order.title, Order.price, Order.client_id)
+#     .where(Client.id == Order.client_id)
+#     .order_by(Order.price.desc())
+#     .limit(1)
+#     .lateral()
+# )
+# with Session(engine) as session:
+#     stmt = (
+#         select(Client.name, subq.c.title, subq.c.price)
+#         .join_from(Client, subq, Client.id == subq.c.client_id)
+#     )
+#     for name, title, max in session.execute(stmt):
+#         print(f'Client: {name} | Order: {title} | Price: ${max}')
 
 #task6
 
@@ -255,3 +250,48 @@ orm_stmt = select(Order).from_statement(u)
 with Session(engine) as session:
     for order in session.execute(orm_stmt).scalars():
         print(f'Order: {order.title} | Price: ${order.price} | Status: {order.status}')
+
+#Exists/Working with SQL functions/Data Casts and Type Coercion
+
+#task1
+subq = (
+    select(Order.id)
+    .where(Order.client_id == Client.id, Order.status == 'in_progress')
+).exists()
+with Session(engine) as session:
+    for name in session.execute(select(Client.name).where(~subq)):
+        print(f'Client: {name}')
+
+#task2
+stmt = (
+    select(
+        Order.title, Order.price, Order.client_id,
+        func.row_number().over(
+            partition_by=Order.client_id,
+            order_by=Order.price.desc()
+        ).label("order_rank")
+    )
+    .select_from(Order)
+    .join(Client)
+)
+with Session(engine) as session:
+    for title, price, id, order_rank in session.execute(stmt):
+        print(f'{title} | {price} | {id} | {order_rank}')
+
+#task3
+stmt = (
+    select(
+        func.count(Order.id).filter(Order.status == 'completed'),
+        func.count(Order.id).filter(Order.status == 'in_progress'),
+        func.sum(Order.price).filter(Order.status == 'completed')
+    )
+)
+with Session(engine) as session:
+    for count_c, count_i, sum in session.execute(stmt):
+        print(f'Completed orders: {count_c}\nOrders in progress: {count_i}\nCompleted orders sum: ${sum}')
+
+#task4
+stmt = select(Order.title, cast(Order.price, String))
+with Session(engine) as session:
+    for title, price in session.execute(stmt):
+        print(f"Order {title} costs ${price}")
