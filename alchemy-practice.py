@@ -1,6 +1,6 @@
 from __future__ import annotations
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, aliased, relationship
-from sqlalchemy import insert, func, ForeignKey, select, bindparam, cast, String, desc, union_all, create_engine, cast
+from sqlalchemy import insert, func, ForeignKey, select, bindparam, cast, String, desc, union_all, create_engine, cast, update, delete
 from typing import List
 
 engine = create_engine("sqlite+pysqlite:///:memory:", echo=True)
@@ -15,6 +15,7 @@ class Client(Base):
     name: Mapped[str]
     channel_type: Mapped[str]
     orders: Mapped[List[Order]] = relationship(back_populates='client')
+    notes: Mapped[str | None] = mapped_column(default=None)
 
 class Order(Base):
     __tablename__ = 'orders'
@@ -295,3 +296,47 @@ stmt = select(Order.title, cast(Order.price, String))
 with Session(engine) as session:
     for title, price in session.execute(stmt):
         print(f"Order {title} costs ${price}")
+
+#Update/Delete
+
+#task1
+stmt = update(Order).where(Order.status == 'in_progress').values(title='URGENT: ' + Order.price)
+with Session(engine) as session:
+    result = session.execute(stmt)
+    session.commit() 
+    print(f"Rows updated: {result.rowcount}")
+
+#task2
+subq = (
+    select(func.count(Order.id))
+    .where(Order.client_id == Client.id)
+    .scalar_subquery()
+)
+
+stmt = update(Client).values(notes = 'Orders count: ' + cast(subq, String))
+with Session(engine) as session:
+    res = session.execute(stmt)
+    session.commit()
+    print(f'Clients updated: {res.rowcount}')
+
+#task3
+stmt = (
+    update(Order)
+    .where(Order.client_id == bindparam('target_id'))
+    .values(price=bindparam('new_price'))
+)
+with engine.begin() as conn:
+    res = conn.execute(stmt, [
+        {"target_id": 1, "new_price": 500},
+        {"target_id": 2, "new_price": 750},
+        {"target_id": 3, "new_price": 1200}
+    ])
+    session.commit()
+    print(f'Rows updated: {res.rowcount}')
+
+#task4
+stmt = delete(Order).where(Order.price < 100).returning(Order.id, Order.title, Order.price)
+with Session(engine) as session:
+    for id, title, price in session.execute(stmt):
+        print(f'Deleted: ID {id} | Title: {title} | Price: ${price}')
+    session.commit()
